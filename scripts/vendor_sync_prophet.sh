@@ -6,7 +6,6 @@ set -euo pipefail
 #   scripts/vendor_sync_prophet.sh            # pulls 'main'
 #   scripts/vendor_sync_prophet.sh <ref>      # pulls specific branch or tag
 #
-# Requirements: git 2.25+, remote network access
 
 REPO_ROOT=$(cd "$(dirname "$0")"/.. && pwd)
 cd "$REPO_ROOT"
