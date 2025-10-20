@@ -117,6 +117,9 @@ class Runner(object):
 
         # build dataset entities        
         common_data = CommonData(self.__C)
+        subset_ratio = 0.001  # Define the subset ratio
+        train_subset_size = int(subset_ratio * len(self.__C.TRAIN_SPLITS))
+        eval_subset_size = int(subset_ratio * len(self.__C.EVAL_SPLITS))
         train_set = DataSet(
             self.__C,
             common_data,
@@ -127,7 +130,7 @@ class Runner(object):
             common_data,
             self.__C.EVAL_SPLITS
         )
-
+        print(f'Train set size: {len(self.__C.TRAIN_SPLITS)}, Test set size: {test_set.data_size}')
         # forward VQA model
         train_topk_results, train_latent_results = self.eval(train_set)
         test_topk_results, test_latent_results = self.eval(test_set)
@@ -169,6 +172,9 @@ def heuristics_login_args(parser):
     parser.add_argument('--gpu', dest='GPU', help='gpu id', type=str, default=None)
     parser.add_argument('--candidate_num', dest='CANDIDATE_NUM', help='topk candidates', type=int, default=None)
     parser.add_argument('--example_num', dest='EXAMPLE_NUM', help='number of most similar examples to be searched, default: 200', type=int, default=None)
+    # Subset options for quick workflow tests
+    parser.add_argument('--subset_ratio', dest='SUBSET_RATIO', help='use only this fraction of data (0-1]', type=float, default=None)
+    parser.add_argument('--subset_count', dest='SUBSET_COUNT', help='use only this many samples', type=int, default=None)
 
 
 if __name__ == '__main__':

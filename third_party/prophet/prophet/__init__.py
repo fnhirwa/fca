@@ -22,6 +22,10 @@ def get_args():
     parser.add_argument('--candidates_path', dest='CANDIDATES_PATH', help='candidates file path, default: "assets/candidates_for_ok.json"', type=str, default=None)
     parser.add_argument('--captions_path', dest='CAPTIONS_PATH', help='captions file path, default: "assets/captions_for_ok.json"', type=str, default=None)
     parser.add_argument('--openai_key', dest='OPENAI_KEY', help='openai api key', type=str, default=None)
+    # Optional subsetting (propagates into dataset loading); mutually exclusive
+    subset_group = parser.add_mutually_exclusive_group()
+    subset_group.add_argument('--subset_ratio', dest='SUBSET_RATIO', help='use only this fraction of data (0-1]', type=float, default=None)
+    subset_group.add_argument('--subset_count', dest='SUBSET_COUNT', help='use only this many samples', type=int, default=None)
     args = parser.parse_args()
     return args
 

@@ -22,14 +22,24 @@ class Cfgs(PATH):
         self.GPU = getattr(args, 'GPU', None)
         if self.GPU is not None:
             self.GPU_IDS = [int(i) for i in self.GPU.split(',')]
-            # print(f'Avaliable GPUs: {torch.cuda.device_count()}')
-            # print(f'Using GPU {self.GPU}')
+            print(f"Avaliable GPUs: {torch.cuda.device_count()}")
+            print(f"Using GPU {self.GPU}")
             self.CURRENT_GPU = self.GPU_IDS[0]
-            torch.cuda.set_device(f'cuda:{self.CURRENT_GPU}')
+
+            # Debugging GPU selection
+            print(f"GPU IDs: {self.GPU_IDS}")
+            print(f"Current GPU: {self.CURRENT_GPU}")
+            print(f"CUDA Device Count: {torch.cuda.device_count()}")
+
+            # Fix for GPU selection
+            if torch.cuda.is_available() and self.CURRENT_GPU < torch.cuda.device_count():
+                torch.cuda.set_device(self.CURRENT_GPU)
+            else:
+                raise RuntimeError(f"Invalid GPU index {self.CURRENT_GPU}. No CUDA GPUs are available.")
+
             self.N_GPU = len(self.GPU_IDS)
             self.SEED = getattr(args, 'SEED', 1111)
             torch.manual_seed(self.SEED)
-            # torch.manual_seed_all(self.SEED)
             if self.N_GPU < 2:
                 torch.cuda.manual_seed(self.SEED)
             else:
