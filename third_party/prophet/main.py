@@ -36,6 +36,5 @@ else:
     )
 
 runner = get_runner(__C, evaluater)
-
 # run
 runner.run()

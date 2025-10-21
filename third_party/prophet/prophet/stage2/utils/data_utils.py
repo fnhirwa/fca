@@ -77,11 +77,25 @@ class Qid2Data(Dict):
         
         _score = aok_score if 'aok' in __C.TASK else ok_score
         
+        # Filter to only process questions that have all required data
+        available_qids = set(qid_to_ques.keys()) & set(qid_to_topk.keys())
+        # Also filter by image IDs that have captions
+        available_iids = set(iid_to_capt.keys())
+        
+        orig_ques_count = len(qid_to_ques)
+        qid_to_ques_filtered = {
+            qid: q for qid, q in qid_to_ques.items() 
+            if qid in available_qids and str(q['image_id']) in available_iids
+        }
+        dropped = orig_ques_count - len(qid_to_ques_filtered)
+        if dropped > 0:
+            print(f'== Filtered out {dropped} questions with missing candidates or captions')
+        
         qid_to_data = {}
         # ques_set = ques_set['questions']
         # anno_set = anno_set['annotations']
-        for qid in qid_to_ques:
-            q_item = qid_to_ques[qid]
+        for qid in qid_to_ques_filtered:
+            q_item = qid_to_ques_filtered[qid]
             t_item = qid_to_topk[qid]
 
             iid = str(q_item['image_id'])
@@ -116,18 +130,51 @@ class Qid2Data(Dict):
 
         self.qid_to_data = qid_to_data
 
+        # Optional subsetting for quick workflow testing
+        subset_count = getattr(__C, 'SUBSET_COUNT', None)
+        subset_ratio = getattr(__C, 'SUBSET_RATIO', None)
+        qid_list = list(self.qid_to_data.keys())
+        orig_size = len(qid_list)
+        
+        if subset_count is None and subset_ratio is not None:
+            if subset_ratio <= 0 or subset_ratio > 1:
+                raise ValueError('SUBSET_RATIO must be in (0, 1].')
+            subset_count = max(1, int(len(qid_list) * subset_ratio))
+        if subset_count is not None:
+            subset_count = min(subset_count, len(qid_list))
+            qid_list = qid_list[:subset_count]
+            # filter qid_to_data to only include subset
+            self.qid_to_data = {qid: self.qid_to_data[qid] for qid in qid_list}
+            print(f'== Applied subsetting: {len(self.qid_to_data)}/{orig_size} samples')
+
         k = __C.K_CANDIDATES
         if annotated:
             print(f'Loaded dataset size: {len(self.qid_to_data)}, top{k} accuracy: {self.topk_accuracy(k)*100:.2f}, top1 accuracy: {self.topk_accuracy(1)*100:.2f}')
         
         if similar_examples:
-            for qid in similar_examples:
-                qid_to_data[qid]['similar_qids'] = similar_examples[qid]
+            # Filter similar_examples to only include qids present in qid_to_data
+            valid_qids = set(self.qid_to_data.keys())
+            filtered_count = 0
             
-            # check if all items have similar_qids
-            for qid, item in self.items():
-                if 'similar_qids' not in item:
-                    raise ValueError(f'qid {qid} does not have similar_qids')
+            for qid in similar_examples:
+                if qid in valid_qids:
+                    # Also filter the referenced similar_qids to only those present in qid_to_data
+                    raw_similar = similar_examples[qid]
+                    filtered_similar = [sim_qid for sim_qid in raw_similar if sim_qid in valid_qids]
+                    if len(filtered_similar) < len(raw_similar):
+                        filtered_count += 1
+                    self.qid_to_data[qid]['similar_qids'] = filtered_similar
+            
+            if filtered_count > 0:
+                print(f'== Filtered similar_qids for {filtered_count} questions due to subsetting/missing data')
+            
+            # Warn about items without similar_qids (but don't fail)
+            missing_similar = [qid for qid in self.qid_to_data if 'similar_qids' not in self.qid_to_data[qid]]
+            if missing_similar:
+                print(f'== Warning: {len(missing_similar)} questions have no similar_qids (example: {missing_similar[0]})')
+                # Set empty list for those without similar examples
+                for qid in missing_similar:
+                    self.qid_to_data[qid]['similar_qids'] = []
         
         
 

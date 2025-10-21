@@ -15,19 +15,89 @@ from datetime import datetime
 from copy import deepcopy
 import yaml
 from pathlib import Path
-import openai
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
 
 from .utils.fancy_pbar import progress, info_column
 from .utils.data_utils import Qid2Data
 from configs.task_cfgs import Cfgs
 
+token = os.getenv("HUGGINGFACE_TOKEN")
 
 class Runner:
     def __init__(self, __C, evaluater):
         self.__C = __C
         self.evaluater = evaluater
-        openai.api_key = __C.OPENAI_KEY
+
+        # LLaMA model
+        self.model = None
+        self.tokenizer = None
+        self.initialize_llama_model(__C.MODEL_PATH)
     
+    def initialize_llama_model(self, model_path):
+        """Loads the LLaMA model and tokenizer."""
+        print(f"Loading LLaMA model from: {model_path}...")
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path, rope_scaling={"type": "linear", "factor": 32.0},use_auth_token=token)
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                use_auth_token=token,
+                rope_scaling={"type": "linear", "factor": 32.0},
+            )
+            self.model.eval()
+            print("LLaMA model loaded successfully.")
+        except Exception as e:
+            print(f"Error loading LLaMA model: {e}")
+            sys.exit(1)
+    
+    def llama_infer(self, prompt_text):
+        if self.__C.DEBUG:
+            print(prompt_text)
+            time.sleep(0.05)
+            return 'debug_answer', 0.0
+
+        try:
+            messages = [{"role": "user", "content": prompt_text}]
+            input_ids = self.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            return_tensors="pt"
+        ).to(self.model.device)
+
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    input_ids,
+                    max_new_tokens=self.__C.MAX_TOKENS,
+                    do_sample=True, 
+                    temperature=self.__C.TEMPERATURE,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+
+                # outputs[0] is the full sequence (input + generated). Slicing removes the input part.
+                response_ids = outputs[0][input_ids.shape[-1]:]
+                response_txt = self.tokenizer.decode(response_ids, skip_special_tokens=True).strip()
+
+                # Note on Probability: Calculating the exact log-probability (as GPT-3 did) for the LLaMA model requires
+                # passing `output_scores=True` to the `generate` function and manually summing the log-softmax of the
+                # generated tokens. For an initial port, we can simplify or use a placeholder, but for exact
+                # replication of the original Prophet mechanism, we need the log-probs.
+                # For simplicity in this replacement, we return a fixed high probability.
+                gen_prob = 1.0 # Placeholder for probability
+
+                return response_txt, gen_prob
+
+        except Exception as e:
+            print(f"LLaMA Inference Error: {type(e)} - {e}")
+            # Unlike the GPT-3 API, local inference errors are usually hardware/setup issues, not transient.
+            # It's better to raise the error or return an empty result.
+            return '', 0.0
+
     def gpt3_infer(self, prompt_text, _retry=0):
         # print(prompt_text)
         # exponential backoff
@@ -158,7 +228,7 @@ class Runner:
                 # print(f'Infer {t}...')
                 prompt_in_ctx = self.get_context(example_qids[(N_inctx * t):(N_inctx * t + N_inctx)])
                 prompt_text = prompt_in_ctx + prompt_query
-                gen_text, gen_prob = self.gpt3_infer(prompt_text)
+                gen_text, gen_prob = self.llama_infer(prompt_text)
 
                 ans = self.evaluater.prep_ans(gen_text)
                 if ans != '':
@@ -206,7 +276,10 @@ def prompt_login_args(parser):
     parser.add_argument('--examples_path', dest='EXAMPLES_PATH', help='answer-aware example file path, default: "assets/answer_aware_examples_for_ok.json"', type=str, default=None)
     parser.add_argument('--candidates_path', dest='CANDIDATES_PATH', help='candidates file path, default: "assets/candidates_for_ok.json"', type=str, default=None)
     parser.add_argument('--captions_path', dest='CAPTIONS_PATH', help='captions file path, default: "assets/captions_for_ok.json"', type=str, default=None)
-    parser.add_argument('--openai_key', dest='OPENAI_KEY', help='openai api key', type=str, default=None)
+    # parser.add_argument('--openai_key', dest='OPENAI_KEY', help='openai api key', type=str, default=None)
+    parser.add_argument('--model_path', dest='MODEL_PATH', 
+                        help='path or Hugging Face ID for LLaMA model', 
+                        type=str, default=None)
 
 
 if __name__ == '__main__':

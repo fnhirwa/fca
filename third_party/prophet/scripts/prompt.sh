@@ -1,6 +1,5 @@
 #!/bin/bash
 # This script is used to prompt GPT-3 to generate final answers.
-
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -19,8 +18,19 @@ while [[ $# -gt 0 ]]; do
     --captions_path)
       CAPTIONS_PATH="$2"
       shift 2;;
-    --openai_key)
-      OPENAI_KEY="$2"
+    # --openai_key)
+    #   OPENAI_KEY="$2"
+    #   shift 2;;
+    --model_path)
+      MODEL_PATH="$2"
+      shift 2;;
+    --subset_ratio)
+      if [[ -z "$2" || "$2" == --* ]]; then echo "--subset_ratio requires a value"; exit 2; fi
+      SUBSET_RATIO="$2"
+      shift 2;;
+    --subset_count)
+      if [[ -z "$2" || "$2" == --* ]]; then echo "--subset_count requires a value"; exit 2; fi
+      SUBSET_COUNT="$2"
       shift 2;;
     *)
       echo "Unknown argument: $1"
@@ -33,9 +43,12 @@ VERSION=${VERSION:-"prompt_okvqa"} # version name, default 'prompt_for_$TASK'
 EXAMPLES_PATH=${EXAMPLES_PATH:-"assets/answer_aware_examples_okvqa.json"} # path to the examples, default is the result from our experiments
 CANDIDATES_PATH=${CANDIDATES_PATH:-"assets/candidates_okvqa.json"} # path to the candidates, default is the result from our experiments
 CAPTIONS_PATH=${CAPTIONS_PATH:-"assets/captions_okvqa.json"} # path to the captions, default is the result from our experiments
-OPENAI_KEY=${OPENAI_KEY:-""} # path to the captions
+# OPENAI_KEY=${OPENAI_KEY:-""} # path to the captions
+MODEL_PATH=${MODEL_PATH:-"meta-llama/Meta-Llama-3-8B-Instruct"} # Default LLaMA model ID
+# SUBSET_RATIO=${SUBSET_RATIO:-}
+# SUBSET_COUNT=${SUBSET_COUNT:-}
 
-# CUDA_VISIBLE_DEVICES=$GPU \
+
 python main.py \
     --task $TASK --run_mode prompt \
     --version $VERSION \
@@ -43,4 +56,5 @@ python main.py \
     --examples_path $EXAMPLES_PATH \
     --candidates_path $CANDIDATES_PATH \
     --captions_path $CAPTIONS_PATH \
-    --openai_key $OPENAI_KEY
+    --model_path $MODEL_PATH
+    # --openai_key $OPENAI_KEY
