@@ -6,17 +6,16 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - numpy=1.21.2=py39h20f2e39_0
-  - opt_einsum=3.3.0=pyhd8ed1ab_1
-  - pip=21.2.4=py39h06a4308_0
-  - python=3.9.11=h12debd9_2
-  - pytorch=1.12.0=py3.9_cuda11.3_cudnn8.3.2_0
-  - rich=12.5.1=py39h06a4308_0
-  - torchvision=0.13.0=py39_cu113
+  - numpy=2.0.2
+  - opt_einsum=3.3.0
+  - pip=21.2.4
+  - python=3.9.11
+  - pytorch=1.12.0
+  - rich=12.5.1
+  - torchvision=0.13.0
   - pip:
-    - pyyaml==6.0
     - einops==0.6.0
-    - huggingface-hub==0.12.1
+    - huggingface-hub==0.34.0
     - openai==0.18.0
     - opencv-python==4.5.5.64
     - pillow==9.3.0
@@ -26,5 +25,5 @@ dependencies:
     - tokenizers==0.11.6
     - tqdm==4.63.0
     - transformers==4.26.1
-    - git+https://github.com/openai/CLIP.git
+    - git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1
 
