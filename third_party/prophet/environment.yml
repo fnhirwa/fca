@@ -10,12 +10,12 @@ dependencies:
   - numpy=2.0.2
   - opt_einsum=3.3.0
   - pip=21.2.4
-  - python=3.9.11
-  - pytorch=2.0.1
-  - pytorch-cuda=11.8
-  - torchaudio=2.0.2
+  - python=3.10
+  - pytorch=2.3.1
+  - pytorch-cuda=12.1
   - rich=12.5.1
-  - torchvision=0.15.2
+  - torchvision=0.18.1
+  - torchaudio=2.3.1
   - pip:
     - einops==0.6.0
     - huggingface-hub==0.34.0
@@ -23,10 +23,10 @@ dependencies:
     - opencv-python==4.5.5.64
     - pillow==9.3.0
     - pyyaml==6.0
-    - sentence-transformers==2.2.2
+    - sentence-transformers==2.3.1
     - sentencepiece==0.1.96
-    - tokenizers==0.11.6
+    - tokenizers==0.22.1
     - tqdm==4.63.0
-    - transformers==4.26.1
-    - git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1
+    - transformers==4.57.1
+    - clip==1.0
 

@@ -39,64 +39,71 @@ class Runner:
         """Loads the LLaMA model and tokenizer."""
         print(f"Loading LLaMA model from: {model_path}...")
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(model_path, rope_scaling={"type": "linear", "factor": 32.0},use_auth_token=token)
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_path,
+                rope_scaling={"type": "linear", "factor": 32.0},
+                use_auth_token=token,
+            )
+            padded = False
             if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-            
+                self.tokenizer.add_special_tokens({'pad_token': '<pad>'})
+                padded = True
+            torch_dtype = torch.bfloat16 if torch.cuda.get_device_properties(0).name.startswith("A100") else torch.float16
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_path,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=torch_dtype,
                 device_map="auto",
                 use_auth_token=token,
                 rope_scaling={"type": "linear", "factor": 32.0},
             )
+            if padded:
+                self.model.resize_token_embeddings(len(self.tokenizer))
             self.model.eval()
             print("LLaMA model loaded successfully.")
         except Exception as e:
             print(f"Error loading LLaMA model: {e}")
             sys.exit(1)
     
-    def llama_infer(self, prompt_text):
+    def llama_infer(self, prompt_texts):
+        """
+        Batched inference for a list of prompts.
+        Each element in prompt_texts is a full text prompt.
+        Returns a list of decoded strings.
+        """
+        if isinstance(prompt_texts, str):
+            prompt_texts = [prompt_texts]
+
         if self.__C.DEBUG:
-            print(prompt_text)
-            time.sleep(0.05)
-            return 'debug_answer', 0.0
+            return ['debug_answer' for _ in prompt_texts]
 
         try:
-            messages = [{"role": "user", "content": prompt_text}]
-            input_ids = self.tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            return_tensors="pt"
-        ).to(self.model.device)
+            inputs = self.tokenizer(
+                prompt_texts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=self.__C.MAX_INPUT_TOKENS if hasattr(self.__C, "MAX_INPUT_TOKENS") else None,
+            ).to(self.model.device)
 
             with torch.no_grad():
                 outputs = self.model.generate(
-                    input_ids,
+                    **inputs,
                     max_new_tokens=self.__C.MAX_TOKENS,
-                    do_sample=True, 
+                    do_sample=True,
                     temperature=self.__C.TEMPERATURE,
-                    pad_token_id=self.tokenizer.eos_token_id
+                    pad_token_id=self.tokenizer.eos_token_id,
                 )
 
-                # outputs[0] is the full sequence (input + generated). Slicing removes the input part.
-                response_ids = outputs[0][input_ids.shape[-1]:]
-                response_txt = self.tokenizer.decode(response_ids, skip_special_tokens=True).strip()
-
-                # Note on Probability: Calculating the exact log-probability (as GPT-3 did) for the LLaMA model requires
-                # passing `output_scores=True` to the `generate` function and manually summing the log-softmax of the
-                # generated tokens. For an initial port, we can simplify or use a placeholder, but for exact
-                # replication of the original Prophet mechanism, we need the log-probs.
-                # For simplicity in this replacement, we return a fixed high probability.
-                gen_prob = 1.0 # Placeholder for probability
-
-                return response_txt, gen_prob
+            # slice out only the newly generated tokens for each item
+            gen_start = inputs["input_ids"].shape[1]
+            new_tokens = outputs[:, gen_start:]
+            decoded = self.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+            return [t.strip() for t in decoded]
 
         except Exception as e:
-            print(f"LLaMA Inference Error: {type(e)} - {e}")
-            # Unlike the GPT-3 API, local inference errors are usually hardware/setup issues, not transient.
-            # It's better to raise the error or return an empty result.
-            return '', 0.0
+            print(f"[llama_infer] Error: {type(e)} - {e}")
+            return ["" for _ in prompt_texts]
+
 
     def gpt3_infer(self, prompt_text, _retry=0):
         # print(prompt_text)
@@ -210,59 +217,89 @@ class Runner:
         
         print()
 
+        batch_size = getattr(self.__C, "BATCH_SIZE", 8)
+        prompt_batch, meta_batch = [], []
+
         for qid in progress.track(self.valset.qid_to_data, description="Working...  "):
             if qid in self.cache:
                 continue
+
             ques = self.valset.get_question(qid)
             caption = self.valset.get_caption(qid)
             cands = self.valset.get_topk_candidates(qid, self.__C.K_CANDIDATES)
-
             prompt_query = self.sample_make(ques, caption, cands)
             example_qids = self.valset.get_similar_qids(qid, k=infer_times * N_inctx)
             random.shuffle(example_qids)
 
-            prompt_info_list = []
-            ans_pool = {}
-            # multi-times infer
+            # collect multiple inference variants for this qid
             for t in range(infer_times):
-                # print(f'Infer {t}...')
                 prompt_in_ctx = self.get_context(example_qids[(N_inctx * t):(N_inctx * t + N_inctx)])
                 prompt_text = prompt_in_ctx + prompt_query
-                gen_text, gen_prob = self.llama_infer(prompt_text)
+                prompt_batch.append(prompt_text)
+                meta_batch.append((qid, t))
 
+                # run batched inference when batch full
+                if len(prompt_batch) >= batch_size:
+                    responses = self.llama_infer(prompt_batch)
+                    for (qid_b, t_b), gen_text in zip(meta_batch, responses):
+                        ans = self.evaluater.prep_ans(gen_text)
+                        gen_prob = 1.0
+                        prompt_info = {
+                            "prompt": prompt_batch[t_b % batch_size],
+                            "answer": gen_text,
+                            "confidence": gen_prob,
+                        }
+
+                        # initialize if not exists
+                        if qid_b not in self.cache:
+                            self.cache[qid_b] = {
+                                "question_id": qid_b,
+                                "answer": "",
+                                "prompt_info": [],
+                            }
+                        self.cache[qid_b]["prompt_info"].append(prompt_info)
+
+                    # flush
+                    prompt_batch, meta_batch = [], []
+
+        # flush any remaining prompts
+        if prompt_batch:
+            responses = self.llama_infer(prompt_batch)
+            for (qid_b, t_b), gen_text in zip(meta_batch, responses):
                 ans = self.evaluater.prep_ans(gen_text)
-                if ans != '':
-                    ans_pool[ans] = ans_pool.get(ans, 0.) + gen_prob
-
+                gen_prob = 1.0
                 prompt_info = {
-                    'prompt': prompt_text,
-                    'answer': gen_text,
-                    'confidence': gen_prob
+                    "prompt": prompt_batch[t_b % batch_size],
+                    "answer": gen_text,
+                    "confidence": gen_prob,
                 }
-                prompt_info_list.append(prompt_info)
-                time.sleep(self.__C.SLEEP_PER_INFER)
-            
-            # vote
+                if qid_b not in self.cache:
+                    self.cache[qid_b] = {
+                        "question_id": qid_b,
+                        "answer": "",
+                        "prompt_info": [],
+                    }
+                self.cache[qid_b]["prompt_info"].append(prompt_info)
+
+        # vote
+        for qid, record in self.cache.items():
+            ans_pool = {}
+            for pinfo in record["prompt_info"]:
+                ans = self.evaluater.prep_ans(pinfo["answer"])
+                if ans:
+                    ans_pool[ans] = ans_pool.get(ans, 0.0) + pinfo["confidence"]
+
             if len(ans_pool) == 0:
-                answer = self.valset.get_topk_candidates(qid, 1)[0]['answer']
+                answer = self.valset.get_topk_candidates(qid, 1)[0]["answer"]
             else:
                 answer = sorted(ans_pool.items(), key=lambda x: x[1], reverse=True)[0][0]
-            
+
+            record["answer"] = answer
             self.evaluater.add(qid, answer)
-            self.cache[qid] = {
-                'question_id': qid,
-                'answer': answer,
-                'prompt_info': prompt_info_list
-            }
-            json.dump(self.cache, open(self.cache_file_path, 'w'))
 
-            ll = len(self.cache)
-            if self.__C.EVAL_NOW and not self.__C.DEBUG:
-                if ll > 21 and ll % 10 == 0:
-                    rt_accuracy = self.valset.rt_evaluate(self.cache.values())
-                    info_column.info = f'Acc: {rt_accuracy}'
-
+        json.dump(self.cache, open(self.cache_file_path, "w"))
         self.evaluater.save(self.__C.RESULT_PATH)
+
         if self.__C.EVAL_NOW:
             with open(self.__C.LOG_PATH, 'a+') as logfile:
                 self.evaluater.evaluate(logfile)

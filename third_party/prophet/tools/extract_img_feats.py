@@ -23,6 +23,8 @@ from tools.transforms import _transform
 
 @torch.no_grad()
 def _extract_feat(img_path, net, T, save_path):
+    if Path(save_path).is_file(): # using cached files
+        return
     # print(img_path)
     img = Image.open(img_path)
     # W, H = img.size

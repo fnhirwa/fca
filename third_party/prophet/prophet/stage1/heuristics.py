@@ -117,9 +117,6 @@ class Runner(object):
 
         # build dataset entities        
         common_data = CommonData(self.__C)
-        subset_ratio = 0.001  # Define the subset ratio
-        train_subset_size = int(subset_ratio * len(self.__C.TRAIN_SPLITS))
-        eval_subset_size = int(subset_ratio * len(self.__C.EVAL_SPLITS))
         train_set = DataSet(
             self.__C,
             common_data,
