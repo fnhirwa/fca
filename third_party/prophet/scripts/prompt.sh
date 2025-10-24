@@ -21,9 +21,6 @@ while [[ $# -gt 0 ]]; do
     # --openai_key)
     #   OPENAI_KEY="$2"
     #   shift 2;;
-    --model_path)
-      MODEL_PATH="$2"
-      shift 2;;
     --subset_ratio)
       if [[ -z "$2" || "$2" == --* ]]; then echo "--subset_ratio requires a value"; exit 2; fi
       SUBSET_RATIO="$2"
@@ -44,7 +41,6 @@ EXAMPLES_PATH=${EXAMPLES_PATH:-"assets/answer_aware_examples_okvqa.json"} # path
 CANDIDATES_PATH=${CANDIDATES_PATH:-"assets/candidates_okvqa.json"} # path to the candidates, default is the result from our experiments
 CAPTIONS_PATH=${CAPTIONS_PATH:-"assets/captions_okvqa.json"} # path to the captions, default is the result from our experiments
 # OPENAI_KEY=${OPENAI_KEY:-""} # path to the captions
-MODEL_PATH=${MODEL_PATH:-"meta-llama/Meta-Llama-3-8B-Instruct"} # Default LLaMA model ID
 # SUBSET_RATIO=${SUBSET_RATIO:-}
 # SUBSET_COUNT=${SUBSET_COUNT:-}
 
@@ -56,5 +52,5 @@ python main.py \
     --examples_path $EXAMPLES_PATH \
     --candidates_path $CANDIDATES_PATH \
     --captions_path $CAPTIONS_PATH \
-    --model_path $MODEL_PATH
+
     # --openai_key $OPENAI_KEY

@@ -11,12 +11,14 @@ import json, time
 import math
 import random
 import argparse
+import re
 from datetime import datetime
 from copy import deepcopy
 import yaml
 from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, StoppingCriteria, StoppingCriteriaList
 import torch
+import torch.nn.functional as F
 
 
 from .utils.fancy_pbar import progress, info_column
@@ -40,35 +42,36 @@ class Runner:
         # LLaMA model
         self.model = None
         self.tokenizer = None
-        self.initialize_llama_model(__C.MODEL_PATH)
+        self.initialize_llama_model(__C.MODEL)
     
     def initialize_llama_model(self, model_path):
         """Loads the LLaMA model and tokenizer."""
         print(f"Loading LLaMA model from: {model_path}...")
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_path,
-            use_auth_token=token,
-            padding_side='left',  # ← CRITICAL FIX
+            token=token,
+            padding_side='left',
         )
+        torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major >= 8 else torch.float16
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,  # Extra compression
+            bnb_4bit_compute_dtype=torch_dtype,
+            bnb_4bit_use_double_quant=True,
         )
-        # pad token if needed
+        # pad token
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         
-        torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major >= 8 else torch.float16
         
+        device_map = "auto"
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             quantization_config=bnb_config,
-            torch_dtype=torch_dtype,
-            device_map="auto",
-            use_auth_token=token,
+            dtype=torch_dtype,
+            device_map=device_map,
+            token=token,
         )
         
         self.model.eval()
@@ -83,44 +86,114 @@ class Runner:
             prompt_texts = [prompt_texts]
 
         if self.__C.DEBUG:
-            return ['debug_answer' for _ in prompt_texts]
+            dummy_answers = ['debug_answer' for _ in prompt_texts]
+            dummy_probs = [1.0 for _ in prompt_texts]
+            return dummy_answers, dummy_probs
+        formatted_prompts = []
+        for prompt in prompt_texts:
+            if prompt.startswith(self.__C.PROMPT_HEAD):
+                content = prompt[len(self.__C.PROMPT_HEAD):]
+                messages = [
+                    {
+                        "role": "system",
+                        "content": self.__C.PROMPT_HEAD.strip() + "Provide only the final answer without any explanations."
+                    },
+                    {
+                        "role": "user",
+                        "content": content
+                    }
+                ]
+            else:
+                messages = [
+                    {"role": "user", "content": prompt}
+                ]
+            
+            formatted = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+            formatted_prompts.append(formatted)
+        
+        return self._infer_on_device(formatted_prompts, stopping_criteria)
 
+    def _infer_on_device(self, formatted_prompts, stopping_criteria):
+        """Helper to run inference on the model (now device-agnostic)."""
         inputs = self.tokenizer(
-            prompt_texts,
+            formatted_prompts,
             return_tensors="pt",
             padding=True,
             truncation=True,
             max_length=2048,
         ).to(self.model.device)
-
+        do_sample = True if self.__C.TEMPERATURE > 0 else False
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=50,
-                do_sample=False,  # Greedy decoding for deterministic results
+                max_new_tokens=20,
+                do_sample=do_sample,
                 pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
                 repetition_penalty=1.2,
                 stopping_criteria=stopping_criteria, 
+                output_scores=True,
+                return_dict_in_generate=True,
+                temperature=self.__C.TEMPERATURE,
             )
+
+        sequences = outputs.sequences
+        scores = outputs.scores
+        
         gen_start = inputs["input_ids"].shape[1]
-        new_tokens = outputs[:, gen_start:]
+        new_tokens = sequences[:, gen_start:]
         decoded = self.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
 
+        probs = []
+        for batch_idx in range(new_tokens.shape[0]):
+            token_logprobs = []
+            for token_idx in range(len(scores)):
+                token_logits = scores[token_idx][batch_idx]
+                token_log_probs = F.log_softmax(token_logits, dim=-1)
+                generated_token_id = new_tokens[batch_idx, token_idx]
+                token_logprob = token_log_probs[generated_token_id].item()
+                
+                if generated_token_id in [self.tokenizer.eos_token_id, self.tokenizer.pad_token_id]:
+                    break
+                
+                token_logprobs.append(token_logprob)
+            
+            if len(token_logprobs) > 0:
+                total_prob = math.exp(sum(token_logprobs))
+            else:
+                total_prob = 0.0
+            probs.append(total_prob)
+        
         cleaned = []
         for text in decoded:
-            first_line = text.strip().split('\n')[0]
-            first_line = first_line.split('(')[0]
-            # first word
+            text = text.strip()
+            
+            patterns = [
+                r'^Based\s+on\s+.*?,?\s*',
+                r'^According\s+to\s+.*?,?\s*',
+                r'^Given\s+.*?,?\s*',
+                r'^The\s+answer\s+is:?\s*',
+                r'^The\s+',
+                r'^There\s+(?:is|are)\s+',
+                r'^It\s+(?:is|appears|seems)\s+',
+                r'^I\s+(?:think|believe|see)\s+',
+            ]
+            
+            for pattern in patterns:
+                text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+            
+            first_line = text.split('\n')[0].split('(')[0]
+            
             answer = first_line.strip().split()[0] if first_line.strip() else ""
-            # trailing punct
             answer = answer.rstrip('.,;:!?')
+            
             cleaned.append(answer)
-        
-        if len(cleaned) > 0:
-            print(f"Sample output: {cleaned[0]}")
-    
-        return cleaned
+        # print(f"LLaMA sampled answer: {cleaned[0]} with prob {probs[0]:.4f}")
+        return cleaned, probs
 
     def gpt3_infer(self, prompt_text, _retry=0):
         # print(prompt_text)
@@ -196,7 +269,6 @@ class Runner:
         Path(self.__C.LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
         with open(self.__C.LOG_PATH, 'w') as f:
             f.write(str(self.__C) + '\n')
-        ## where results will be saved
         Path(self.__C.RESULT_DIR).mkdir(parents=True, exist_ok=True)
         
         self.cache = {}
@@ -248,26 +320,23 @@ class Runner:
             example_qids = self.valset.get_similar_qids(qid, k=infer_times * N_inctx)
             random.shuffle(example_qids)
 
-            # collect multiple inference variants for this qid
             for t in range(infer_times):
                 prompt_in_ctx = self.get_context(example_qids[(N_inctx * t):(N_inctx * t + N_inctx)])
                 prompt_text = prompt_in_ctx + prompt_query
                 prompt_batch.append(prompt_text)
                 meta_batch.append((qid, t))
 
-                # run batched inference when batch full
+                # batched inference when batch full
                 if len(prompt_batch) >= batch_size:
-                    responses = self.llama_infer(prompt_batch)
-                    for (qid_b, t_b), gen_text in zip(meta_batch, responses):
+                    responses, response_probs = self.llama_infer(prompt_batch)
+                    for idx, ((qid_b, t_b), gen_text, gen_prob) in enumerate(zip(meta_batch, responses, response_probs)):
                         ans = self.evaluater.prep_ans(gen_text)
-                        gen_prob = 1.0
                         prompt_info = {
-                            "prompt": prompt_batch[t_b % batch_size],
+                            "prompt": prompt_batch[idx],
                             "answer": gen_text,
                             "confidence": gen_prob,
                         }
 
-                        # initialize if not exists
                         if qid_b not in self.cache:
                             self.cache[qid_b] = {
                                 "question_id": qid_b,
@@ -281,12 +350,11 @@ class Runner:
 
         # flush any remaining prompts
         if prompt_batch:
-            responses = self.llama_infer(prompt_batch)
-            for (qid_b, t_b), gen_text in zip(meta_batch, responses):
+            responses, response_probs = self.llama_infer(prompt_batch)
+            for idx, ((qid_b, t_b), gen_text, gen_prob) in enumerate(zip(meta_batch, responses, response_probs)):
                 ans = self.evaluater.prep_ans(gen_text)
-                gen_prob = 1.0
                 prompt_info = {
-                    "prompt": prompt_batch[t_b % batch_size],
+                    "prompt": prompt_batch[idx],
                     "answer": gen_text,
                     "confidence": gen_prob,
                 }
@@ -331,9 +399,7 @@ def prompt_login_args(parser):
     parser.add_argument('--candidates_path', dest='CANDIDATES_PATH', help='candidates file path, default: "assets/candidates_for_ok.json"', type=str, default=None)
     parser.add_argument('--captions_path', dest='CAPTIONS_PATH', help='captions file path, default: "assets/captions_for_ok.json"', type=str, default=None)
     # parser.add_argument('--openai_key', dest='OPENAI_KEY', help='openai api key', type=str, default=None)
-    parser.add_argument('--model_path', dest='MODEL_PATH', 
-                        help='path or Hugging Face ID for LLaMA model', 
-                        type=str, default=None)
+
 
 
 if __name__ == '__main__':

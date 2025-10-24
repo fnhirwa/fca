@@ -1,5 +1,5 @@
-MODEL: text-davinci-002
-TEMPERATURE: 0.
+MODEL: meta-llama/Meta-Llama-3.1-8B-Instruct
+TEMPERATURE: 0.4
 MAX_TOKENS: 8
 SLEEP_PER_INFER: 10
 
