@@ -45,38 +45,34 @@ class Runner:
     def initialize_llama_model(self, model_path):
         """Loads the LLaMA model and tokenizer."""
         print(f"Loading LLaMA model from: {model_path}...")
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_path,
-                use_auth_token=token,
-                padding_side='left',  # ← CRITICAL FIX
-            )
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,  # Extra compression
-            )
-            # pad token if needed
-            if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-            
-            torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major >= 8 else torch.float16
-            
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                quantization_config=bnb_config,
-                torch_dtype=torch_dtype,
-                device_map="auto",
-                use_auth_token=token,
-            )
-            
-            self.model.eval()
-            print("LLaMA model loaded successfully.")
-        except Exception as e:
-            print(f"Error loading LLaMA model: {e}")
-            sys.exit(1)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            use_auth_token=token,
+            padding_side='left',  # ← CRITICAL FIX
+        )
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,  # Extra compression
+        )
+        # pad token if needed
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        
+        torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major >= 8 else torch.float16
+        
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            quantization_config=bnb_config,
+            torch_dtype=torch_dtype,
+            device_map="auto",
+            use_auth_token=token,
+        )
+        
+        self.model.eval()
+        print("LLaMA model loaded successfully.")
 
     def llama_infer(self, prompt_texts):
         """
@@ -89,49 +85,42 @@ class Runner:
         if self.__C.DEBUG:
             return ['debug_answer' for _ in prompt_texts]
 
-        try:
-            inputs = self.tokenizer(
-                prompt_texts,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=2048,
-            ).to(self.model.device)
+        inputs = self.tokenizer(
+            prompt_texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=2048,
+        ).to(self.model.device)
 
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=50,
-                    do_sample=False,  # Greedy decoding for deterministic results
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.2,
-                    stopping_criteria=stopping_criteria, 
-                )
-            gen_start = inputs["input_ids"].shape[1]
-            new_tokens = outputs[:, gen_start:]
-            decoded = self.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=50,
+                do_sample=False,  # Greedy decoding for deterministic results
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+                repetition_penalty=1.2,
+                stopping_criteria=stopping_criteria, 
+            )
+        gen_start = inputs["input_ids"].shape[1]
+        new_tokens = outputs[:, gen_start:]
+        decoded = self.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
 
-            cleaned = []
-            for text in decoded:
-                first_line = text.strip().split('\n')[0]
-                first_line = first_line.split('(')[0]
-                # first word
-                answer = first_line.strip().split()[0] if first_line.strip() else ""
-                # trailing punct
-                answer = answer.rstrip('.,;:!?')
-                cleaned.append(answer)
-            
-            if len(cleaned) > 0:
-                print(f"Sample output: {cleaned[0]}")
+        cleaned = []
+        for text in decoded:
+            first_line = text.strip().split('\n')[0]
+            first_line = first_line.split('(')[0]
+            # first word
+            answer = first_line.strip().split()[0] if first_line.strip() else ""
+            # trailing punct
+            answer = answer.rstrip('.,;:!?')
+            cleaned.append(answer)
         
-            return cleaned
-
-        except Exception as e:
-            print(f"[llama_infer] Error: {type(e)} - {e}")
-            import traceback
-            traceback.print_exc()
-            return ["" for _ in prompt_texts]
+        if len(cleaned) > 0:
+            print(f"Sample output: {cleaned[0]}")
+    
+        return cleaned
 
     def gpt3_infer(self, prompt_text, _retry=0):
         # print(prompt_text)
