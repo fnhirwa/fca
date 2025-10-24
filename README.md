@@ -36,3 +36,21 @@ Notes:
 
 - Squashing keeps the repo small while still allowing future pulls.
 - If you make local modifications to `third_party/prophet`, document them clearly in commit messages to ease future merges.
+
+
+## Running Experiment for OKVQA
+
+- Download all dataset and pretrained models as mentioned in [Prophet](third_party/prophet/README.md)
+
+- Run Feature extraction 
+```bash
+bash scripts/extract_img_feats.sh --dataset ok --gpu 
+```
+- Generate Heuristics
+```bash
+bash scripts/heuristics_gen.sh --task ok --version okvqa_heuristics_1 --gpu 0 --ckpt_path outputs/ckpts/mcan_ft_okvqa.pkl --candidate_num 5 --example_num 10 
+```
+- Prompting
+```bash
+bash scripts/prompt.sh --task ok --version okvqa_prompt_1 --examples_path outputs/results/okvqa_heuristics_1/examples.json --candidates_path outputs/results/okvqa_heuristics_1/candidates.json 
+```
