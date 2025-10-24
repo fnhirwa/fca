@@ -15,7 +15,7 @@ from datetime import datetime
 from copy import deepcopy
 import yaml
 from pathlib import Path
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, StoppingCriteria, StoppingCriteriaList
 import torch
 
 
@@ -24,6 +24,13 @@ from .utils.data_utils import Qid2Data
 from configs.task_cfgs import Cfgs
 
 token = os.getenv("HUGGINGFACE_TOKEN")
+
+class StopOnNewline(StoppingCriteria):
+        def __init__(self, tokenizer):
+            self.newline_id = tokenizer.encode('\n', add_special_tokens=False)[0]
+        
+        def __call__(self, input_ids, scores, **kwargs):
+            return input_ids[0, -1] == self.newline_id
 
 class Runner:
     def __init__(self, __C, evaluater):
@@ -41,35 +48,41 @@ class Runner:
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_path,
-                rope_scaling={"type": "linear", "factor": 32.0},
                 use_auth_token=token,
+                padding_side='left',  # ← CRITICAL FIX
             )
-            padded = False
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,  # Extra compression
+            )
+            # pad token if needed
             if self.tokenizer.pad_token is None:
-                self.tokenizer.add_special_tokens({'pad_token': '<pad>'})
-                padded = True
-            torch_dtype = torch.bfloat16 if torch.cuda.get_device_properties(0).name.startswith("A100") else torch.float16
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            
+            torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major >= 8 else torch.float16
+            
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_path,
+                quantization_config=bnb_config,
                 torch_dtype=torch_dtype,
                 device_map="auto",
                 use_auth_token=token,
-                rope_scaling={"type": "linear", "factor": 32.0},
             )
-            if padded:
-                self.model.resize_token_embeddings(len(self.tokenizer))
+            
             self.model.eval()
             print("LLaMA model loaded successfully.")
         except Exception as e:
             print(f"Error loading LLaMA model: {e}")
             sys.exit(1)
-    
+
     def llama_infer(self, prompt_texts):
         """
         Batched inference for a list of prompts.
-        Each element in prompt_texts is a full text prompt.
-        Returns a list of decoded strings.
         """
+        stopping_criteria = StoppingCriteriaList([StopOnNewline(self.tokenizer)])
         if isinstance(prompt_texts, str):
             prompt_texts = [prompt_texts]
 
@@ -82,28 +95,43 @@ class Runner:
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
-                max_length=self.__C.MAX_INPUT_TOKENS if hasattr(self.__C, "MAX_INPUT_TOKENS") else None,
+                max_length=2048,
             ).to(self.model.device)
 
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=self.__C.MAX_TOKENS,
-                    do_sample=True,
-                    temperature=self.__C.TEMPERATURE,
-                    pad_token_id=self.tokenizer.eos_token_id,
+                    max_new_tokens=50,
+                    do_sample=False,  # Greedy decoding for deterministic results
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    repetition_penalty=1.2,
+                    stopping_criteria=stopping_criteria, 
                 )
-
-            # slice out only the newly generated tokens for each item
             gen_start = inputs["input_ids"].shape[1]
             new_tokens = outputs[:, gen_start:]
             decoded = self.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-            return [t.strip() for t in decoded]
+
+            cleaned = []
+            for text in decoded:
+                first_line = text.strip().split('\n')[0]
+                first_line = first_line.split('(')[0]
+                # first word
+                answer = first_line.strip().split()[0] if first_line.strip() else ""
+                # trailing punct
+                answer = answer.rstrip('.,;:!?')
+                cleaned.append(answer)
+            
+            if len(cleaned) > 0:
+                print(f"Sample output: {cleaned[0]}")
+        
+            return cleaned
 
         except Exception as e:
             print(f"[llama_infer] Error: {type(e)} - {e}")
+            import traceback
+            traceback.print_exc()
             return ["" for _ in prompt_texts]
-
 
     def gpt3_infer(self, prompt_text, _retry=0):
         # print(prompt_text)
@@ -217,7 +245,7 @@ class Runner:
         
         print()
 
-        batch_size = getattr(self.__C, "BATCH_SIZE", 8)
+        batch_size = getattr(self.__C, "BATCH_SIZE", 64)
         prompt_batch, meta_batch = [], []
 
         for qid in progress.track(self.valset.qid_to_data, description="Working...  "):
