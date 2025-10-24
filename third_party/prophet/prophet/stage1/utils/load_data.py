@@ -105,17 +105,21 @@ class DataSet(Data.Dataset):
             self.qids = [str(ques['question_id']) for ques in self.ques_list]
         else:
             raise ValueError('Answer list is longer than question list!')
-        # Build lookup before filtering/subsetting
-        self.qid_to_ques = {str(ques['question_id']): ques for ques in self.ques_list}
-        self.qid_to_ans = {str(ans['question_id']): ans for ans in self.ans_list}
+        subset_ratio = getattr(__C, 'SUBSET_RATIO', None)
+        subset_count = getattr(__C, 'SUBSET_COUNT', None)
+        do_subset = (subset_ratio is not None and subset_ratio > 0) or (subset_count is not None and subset_count > 0)
+        if do_subset:
+            # Build lookup before filtering/subsetting
+            self.qid_to_ques = {str(ques['question_id']): ques for ques in self.ques_list}
+            self.qid_to_ans = {str(ans['question_id']): ans for ans in self.ans_list}
 
-        # Filter out samples whose image features are missing
-        available_img_ids = set(self.imgid_to_path.keys())
-        orig_count = len(self.qids)
-        self.qids = [qid for qid in self.qids if int(self.qid_to_ques[qid]['image_id']) in available_img_ids]
-        dropped = orig_count - len(self.qids)
-        if dropped > 0:
-            print(f'== Filtered out {dropped} samples with missing image features')
+            # Filter out samples whose image features are missing
+            available_img_ids = set(self.imgid_to_path.keys())
+            orig_count = len(self.qids)
+            self.qids = [qid for qid in self.qids if int(self.qid_to_ques[qid]['image_id']) in available_img_ids]
+            dropped = orig_count - len(self.qids)
+            if dropped > 0:
+                print(f'== Filtered out {dropped} samples with missing image features')
 
         self.data_size = len(self.qids)
         print(f'== data size: {self.data_size}\n')

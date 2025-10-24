@@ -22,14 +22,9 @@ class Cfgs(PATH):
         self.GPU = getattr(args, 'GPU', None)
         if self.GPU is not None:
             self.GPU_IDS = [int(i) for i in self.GPU.split(',')]
-            print(f"Avaliable GPUs: {torch.cuda.device_count()}")
-            print(f"Using GPU {self.GPU}")
+            # print(f"Avaliable GPUs: {torch.cuda.device_count()}")
+            # print(f"Using GPU {self.GPU}")
             self.CURRENT_GPU = self.GPU_IDS[0]
-
-            # Debugging GPU selection
-            print(f"GPU IDs: {self.GPU_IDS}")
-            print(f"Current GPU: {self.CURRENT_GPU}")
-            print(f"CUDA Device Count: {torch.cuda.device_count()}")
 
             # Fix for GPU selection
             if torch.cuda.is_available() and self.CURRENT_GPU < torch.cuda.device_count():

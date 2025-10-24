@@ -127,7 +127,6 @@ class Runner(object):
             common_data,
             self.__C.EVAL_SPLITS
         )
-        print(f'Train set size: {len(self.__C.TRAIN_SPLITS)}, Test set size: {test_set.data_size}')
         # forward VQA model
         train_topk_results, train_latent_results = self.eval(train_set)
         test_topk_results, test_latent_results = self.eval(test_set)
