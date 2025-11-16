@@ -54,3 +54,24 @@ bash scripts/heuristics_gen.sh --task ok --version okvqa_heuristics_1 --gpu 0 --
 ```bash
 bash scripts/prompt.sh --task ok --version okvqa_prompt_1 --examples_path outputs/results/okvqa_heuristics_1/examples.json --candidates_path outputs/results/okvqa_heuristics_1/candidates.json 
 ```
+
+
+## Understanding project structure
+- `third_party/prophet/`: Vendored Prophet codebase.
+- `scripts/`: Helper scripts for data processing, training, and evaluation.
+- `src/`: Source code for our extensions and modifications to Prophet.
+
+### third_party/prophet/
+Refer to `third_party/prophet/README.md` for detailed documentation on the Prophet codebase.
+
+#### prophet is made of two stages:
+1. Heuristic Generation: Generate question-aware captions using a pretrained VQA model and captioning model.
+2. Prompting: Use the generated captions to prompt a large language model for final answer
+
+#### Extensions
+The extended module for question-aware is implemented in `src/captioning/qa_captioner.py` and integrated into the heuristic generation stage.
+
+The fusion with existing prophet code will be done in second stage (Prompting) where the generated captions are prepended to the original image captions before prompting the LLM.
+
+For a deep dive into configuration (`__C`), data loaders, heuristics, prompting flow, subsetting, and integration points for question-aware captioning, see:
+[docs/stage_pipeline_guide.md](docs/stage_pipeline_guide.md)

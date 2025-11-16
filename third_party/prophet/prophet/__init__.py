@@ -26,6 +26,9 @@ def get_args():
     subset_group = parser.add_mutually_exclusive_group()
     subset_group.add_argument('--subset_ratio', dest='SUBSET_RATIO', help='use only this fraction of data (0-1]', type=float, default=None)
     subset_group.add_argument('--subset_count', dest='SUBSET_COUNT', help='use only this many samples', type=int, default=None)
+    parser.add_argument('--model_path', dest='MODEL_PATH', 
+                        help='path or Hugging Face ID for LLaMA model', 
+                        type=str, default=None)
     args = parser.parse_args()
     return args
 
