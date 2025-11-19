@@ -114,6 +114,9 @@ class Cfgs(PATH):
         # ---- Heuristics Generations ----
         # --------------------------------
 
+        self.USE_QACAP = False
+        self.QACAP_FUSION_STRATEGY = 'prepend'
+
         self.CANDIDATE_NUM = getattr(args, 'CANDIDATE_NUM', None)
         if self.CANDIDATE_NUM is not None:
             self.CANDIDATE_FILE_PATH = os.path.join(

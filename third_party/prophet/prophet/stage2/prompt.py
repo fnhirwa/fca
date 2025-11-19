@@ -398,6 +398,7 @@ def prompt_login_args(parser):
     parser.add_argument('--examples_path', dest='EXAMPLES_PATH', help='answer-aware example file path, default: "assets/answer_aware_examples_for_ok.json"', type=str, default=None)
     parser.add_argument('--candidates_path', dest='CANDIDATES_PATH', help='candidates file path, default: "assets/candidates_for_ok.json"', type=str, default=None)
     parser.add_argument('--captions_path', dest='CAPTIONS_PATH', help='captions file path, default: "assets/captions_for_ok.json"', type=str, default=None)
+    parser.add_argument('--qa_captions_path', dest='QA_CAPTIONS_PATH', help='Path to the generated question-aware captions JSON file.', type=str, default=None)
     # parser.add_argument('--openai_key', dest='OPENAI_KEY', help='openai api key', type=str, default=None)
 
 
