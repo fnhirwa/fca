@@ -45,7 +45,7 @@ def main():
 
     # --- Dataloader Creation ---
     # The splits to generate captions for are typically the same as the eval splits for heuristics
-    splits_to_process = __C.EVAL_SPLITS
+    splits_to_process = __C.TRAIN_SPLITS
     print(f"Creating dataloader for splits: {splits_to_process}")
 
     # Note: The transform is handled internally by the QACaptioner's processor,

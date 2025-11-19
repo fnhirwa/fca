@@ -11,7 +11,7 @@ code (see docs section 9).
 """
 import os
 import json
-from typing import Optional, Union, List, Dict, Any
+from typing import Optional, Union, Any
 from dataclasses import dataclass
 
 from PIL import Image
@@ -87,18 +87,21 @@ class QACaptioner:
             self.using_stub = False
             print(f"[QACap] Loaded InstructBLIP model: {self.cfg.model_name_or_path} on device {self.cfg.device}")
 
+    def _get_prompt(self, question: str) -> str:
+        """Constructs the prompt"""
+        return f"Generate a descriptive image caption. The caption should focus only on the visual details in the image that are relevant to the following topic: {question}"
+
     def generate(
         self,
         image: Optional[Union[str, Image.Image]],
         question: str,
-        base_caption: Optional[str] = None,
     ) -> str:
         """Generate a question-aware caption for a single image."""
         if self.using_stub or image is None:
-            return self._heuristics(question=question, base_caption=base_caption)
-        return self._inference(image=image, question=question, base_caption=base_caption)
+            return self._heuristics(question=question)
+        return self._inference(image=image, question=question)
 
-    def generate_from_loader(self, dataloader) -> Dict[str, str]:
+    def generate_from_loader(self, dataloader) -> dict[str, str]:
         """
         Generates captions for all samples in a dataloader and returns a dictionary
         mapping question_id to the caption string.
@@ -112,12 +115,10 @@ class QACaptioner:
             images = batch['image']
             questions = batch['question']
             question_ids = batch['question_id']
-            base_captions = batch.get('base_caption') 
 
             batch_captions = self.generate_batch(
                 images=images,
                 questions=questions,
-                base_captions=base_captions
             )
             
             for i, caption in enumerate(batch_captions):
@@ -130,16 +131,13 @@ class QACaptioner:
         self,
         image: Union[str, Image.Image],
         question: str,
-        base_caption: Optional[str] = None,
         generation_config: Optional[GenerationConfig] = None
     ) -> str:
         """Run InstructBLIP inference to generate question-aware caption."""
         if isinstance(image, str):
             image = Image.open(image).convert('RGB')
 
-        prompt = question
-        if base_caption:
-            prompt = f"Based on the fact that '{base_caption}', {question}"
+        prompt = self._get_prompt(question)
 
         inputs = self.processor(images=image, text=prompt, return_tensors="pt").to(self.cfg.device)
         
@@ -161,20 +159,14 @@ class QACaptioner:
 
     def generate_batch(
         self,
-        images: Union[List[str], List[Image.Image], torch.Tensor],
-        questions: List[str],
-        base_captions: Optional[List[str]] = None,
-    ) -> List[str]:
+        images: Union[list[str], list[Image.Image], torch.Tensor],
+        questions: list[str],
+    ) -> list[str]:
         """Generate question-aware captions for a batch of images."""
         if self.using_stub:
-            return [self._heuristics(q, b) for q, b in zip(questions, base_captions or [None]*len(questions))]
+            return [self._heuristics(q) for q in questions]
 
-        prompts = []
-        for i, question in enumerate(questions):
-            if base_captions and base_captions[i]:
-                prompts.append(f"Based on the fact that '{base_captions[i]}', {question}")
-            else:
-                prompts.append(question)
+        prompts = [self._get_prompt(q) for q in questions]
 
         inputs = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.cfg.device)
         
@@ -193,13 +185,9 @@ class QACaptioner:
     def _heuristics(
         self,
         question: Optional[str] = None,
-        base_caption: Optional[str] = None,
     ) -> str:
         """Fallback heuristic caption generation."""
-        if base_caption:
-            caption = base_caption
-            if self.cfg.include_question_in_fallback and question:
-                caption += " | Question: " + question
-        else:
-            caption = "No caption available."
+        caption = "No caption available."
+        if self.cfg.include_question_in_fallback and question:
+            caption += " | Question: " + question
         return caption

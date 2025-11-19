@@ -48,6 +48,7 @@ class DataSet(Dataset):
         self.questions = []
         for split_name in split_name_list:
             ques_path = os.path.join(__C.PROPHET_PATH, __C.QUESTION_PATH[split_name])
+            # print(f"--- Loading questions from: {ques_path} ---")
             ques_data = json.load(open(ques_path, 'r'))
             if 'questions' in ques_data:
                 self.questions.extend(ques_data['questions'])
@@ -89,6 +90,14 @@ class DataSet(Dataset):
             # This should ideally not happen due to pre-filtering
             return None
 
+
+        # print(f"\n--- Loading item {idx} ---")
+        # print(f"  - Question ID: {question_id}")
+        # print(f"  - Question: '{question_text}'")
+        # print(f"  - Image Path: {image_path}")
+    
+
+        # Return the raw PIL image. The processor will handle transforms.
         image = Image.open(image_path).convert('RGB')
 
         return {
@@ -99,7 +108,7 @@ class DataSet(Dataset):
             'image_path': image_path
         }
 
-def captions_collate_fn(batch):
+def caption_collate_fn(batch):
     """
     Custom collate function to handle batches of PIL images.
     The default collate function cannot stack PIL images into a tensor.
@@ -141,7 +150,7 @@ def create_caption_dataloader(__C, split_name_list, batch_size=8, shuffle=False,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        collate_fn=captions_collate_fn
+        collate_fn=caption_collate_fn # Use the custom collate function
     )
     
     return dataloader
