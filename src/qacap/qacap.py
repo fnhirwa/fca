@@ -15,7 +15,7 @@ from typing import Optional, Union, List, Dict, Any
 from dataclasses import dataclass
 
 from PIL import Image
-from transformers import InstructBlipProcessor, InstructBlipForConditionalGeneration
+from transformers import InstructBlipProcessor, InstructBlipForConditionalGeneration, GenerationConfig
 import torch
 from tqdm import tqdm
 
@@ -55,7 +55,7 @@ def load_instructblip_model(
 @dataclass
 class QACaptionerConfig:
     """Configuration for QACaptioner."""
-    model_name_or_path: str = 'Salesforce/instruct-blip-flan-t5-xl'
+    model_name_or_path: str = 'Salesforce/instructblip-flan-t5-xl'
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     fp16: bool = True
     max_new_tokens: int = 32
@@ -92,44 +92,37 @@ class QACaptioner:
         image: Optional[Union[str, Image.Image]],
         question: str,
         base_caption: Optional[str] = None,
-    ) -> dict[str, any]:
+    ) -> str:
         """Generate a question-aware caption for a single image."""
         if self.using_stub or image is None:
             return self._heuristics(question=question, base_caption=base_caption)
         return self._inference(image=image, question=question, base_caption=base_caption)
 
-    def generate_from_loader(self, dataloader) -> Dict[str, Dict[str, Any]]:
+    def generate_from_loader(self, dataloader) -> Dict[str, str]:
         """
         Generates captions for all samples in a dataloader and returns a dictionary
-        mapping question_id to the caption and confidence.
+        mapping question_id to the caption string.
         """
         results = {}
         print("Generating captions from dataloader...")
         for batch in tqdm(dataloader):
             if batch is None:
                 continue
-            
-            # The dataloader from caption_dataset provides PIL images directly
-            # when torch is not available or if not transformed.
-            # For this captioner, we need the PIL image.
-            # Let's assume the dataloader can provide it.
-            # A robust implementation would fetch images from paths if not available.
-            
-            for i in range(len(batch['question'])):
-                question_id = batch['question_id'][i].item()
-                question = batch['question'][i]
-                
-                # To get the PIL image, we can reload it from the path,
-                # which is inefficient but reliable.
-                image_path = batch['image_path'][i]
-                if not os.path.exists(image_path):
-                    print(f"Warning: Image not found at {image_path}, skipping.")
-                    continue
-                
-                image = Image.open(image_path).convert('RGB')
 
-                result = self.generate(image=image, question=question)
-                results[str(question_id)] = result
+            images = batch['image']
+            questions = batch['question']
+            question_ids = batch['question_id']
+            base_captions = batch.get('base_caption') 
+
+            batch_captions = self.generate_batch(
+                images=images,
+                questions=questions,
+                base_captions=base_captions
+            )
+            
+            for i, caption in enumerate(batch_captions):
+                question_id = question_ids[i].item()
+                results[str(question_id)] = caption
         
         return results
 
@@ -138,7 +131,8 @@ class QACaptioner:
         image: Union[str, Image.Image],
         question: str,
         base_caption: Optional[str] = None,
-    ) -> dict[str, any]:
+        generation_config: Optional[GenerationConfig] = None
+    ) -> str:
         """Run InstructBLIP inference to generate question-aware caption."""
         if isinstance(image, str):
             image = Image.open(image).convert('RGB')
@@ -148,6 +142,42 @@ class QACaptioner:
             prompt = f"Based on the fact that '{base_caption}', {question}"
 
         inputs = self.processor(images=image, text=prompt, return_tensors="pt").to(self.cfg.device)
+        
+        if generation_config is None:
+            generation_config = GenerationConfig(
+                max_new_tokens=self.cfg.max_new_tokens,
+                temperature=self.cfg.temperature,
+                do_sample=False,
+            )
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                generation_config=generation_config
+            )
+        caption = self.processor.batch_decode(outputs, skip_special_tokens=True)[0].strip()
+        
+        return caption
+
+    def generate_batch(
+        self,
+        images: Union[List[str], List[Image.Image], torch.Tensor],
+        questions: List[str],
+        base_captions: Optional[List[str]] = None,
+    ) -> List[str]:
+        """Generate question-aware captions for a batch of images."""
+        if self.using_stub:
+            return [self._heuristics(q, b) for q, b in zip(questions, base_captions or [None]*len(questions))]
+
+        prompts = []
+        for i, question in enumerate(questions):
+            if base_captions and base_captions[i]:
+                prompts.append(f"Based on the fact that '{base_captions[i]}', {question}")
+            else:
+                prompts.append(question)
+
+        inputs = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.cfg.device)
+        
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -155,16 +185,16 @@ class QACaptioner:
                 temperature=self.cfg.temperature,
                 do_sample=False
             )
-        caption = self.processor.batch_decode(outputs, skip_special_tokens=True)[0].strip()
         
-        confidence = self._estimate_confidence(caption)
-        return {'caption': caption, 'confidence': confidence}
+        captions = self.processor.batch_decode(outputs, skip_special_tokens=True)
+        
+        return [caption.strip() for caption in captions]
 
     def _heuristics(
         self,
         question: Optional[str] = None,
         base_caption: Optional[str] = None,
-    ) -> dict[str, any]:
+    ) -> str:
         """Fallback heuristic caption generation."""
         if base_caption:
             caption = base_caption
@@ -172,11 +202,4 @@ class QACaptioner:
                 caption += " | Question: " + question
         else:
             caption = "No caption available."
-        confidence = 0.5  # Lower confidence for heuristic fallback
-        return {'caption': caption, 'confidence': confidence}
-
-    def _estimate_confidence(self, caption: str) -> float:
-        """Estimate confidence score for the generated caption."""
-        # Simple heuristic: longer captions are considered more confident
-        length = len(caption.split())
-        return min(1.0, max(0.1, length / 20.0))
+        return caption

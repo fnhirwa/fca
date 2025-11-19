@@ -4,7 +4,6 @@ import glob
 from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
 
 class CommonData:
     """
@@ -18,7 +17,8 @@ class CommonData:
         for split in __C.FEATURE_SPLIT:
             # Assumes __C.IMAGE_DIR holds the paths to raw image directories
             if split in __C.IMAGE_DIR:
-                image_dir = __C.IMAGE_DIR[split]
+                # Correctly join the workspace path with the relative image directory
+                image_dir = os.path.join(__C.PROPHET_PATH, __C.IMAGE_DIR[split])
                 self.img_path_list.extend(glob.glob(os.path.join(image_dir, '*.jpg')))
 
         self.imgid_to_path = {}
@@ -38,9 +38,8 @@ class DataSet(Dataset):
     A PyTorch Dataset for loading questions and corresponding raw images,
     mirroring the structure of the prophet's original DataSet.
     """
-    def __init__(self, __C, common_data, split_name_list, transform=None):
+    def __init__(self, __C, common_data, split_name_list):
         self.__C = __C
-        self.transform = transform
         print(f'Loading dataset for {self.__C.TASK}|captioning({split_name_list})')
 
         self.imgid_to_path = common_data.imgid_to_path
@@ -48,7 +47,7 @@ class DataSet(Dataset):
         # Load questions
         self.questions = []
         for split_name in split_name_list:
-            ques_path = __C.QUESTION_PATH[split_name]
+            ques_path = os.path.join(__C.PROPHET_PATH, __C.QUESTION_PATH[split_name])
             ques_data = json.load(open(ques_path, 'r'))
             if 'questions' in ques_data:
                 self.questions.extend(ques_data['questions'])
@@ -92,45 +91,49 @@ class DataSet(Dataset):
 
         image = Image.open(image_path).convert('RGB')
 
-        if self.transform:
-            image = self.transform(image)
-
         return {
             'image': image,
             'question': question_text,
             'image_id': image_id,
-            'question_id': question_id
+            'question_id': question_id,
+            'image_path': image_path
         }
 
-def get_default_transform(image_size=224):
-    """Returns a default set of transformations for images."""
-    return transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-
-def collate_fn(batch):
-    """Custom collate function to filter out samples where the image was not found."""
+def captions_collate_fn(batch):
+    """
+    Custom collate function to handle batches of PIL images.
+    The default collate function cannot stack PIL images into a tensor.
+    """
     batch = [item for item in batch if item is not None]
     if not batch:
         return None
-    return torch.utils.data.dataloader.default_collate(batch)
+    
+    # Separate images from other data
+    images = [item['image'] for item in batch]
+    questions = [item['question'] for item in batch]
+    image_ids = torch.tensor([item['image_id'] for item in batch])
+    question_ids = torch.tensor([item['question_id'] for item in batch])
+    image_paths = [item['image_path'] for item in batch]
 
-def create_caption_dataloader(__C, split_name_list, transform=None, batch_size=8, shuffle=False, num_workers=0):
+    return {
+        'image': images, # List of PIL images
+        'question': questions,
+        'image_id': image_ids,
+        'question_id': question_ids,
+        'image_path': image_paths
+    }
+
+def create_caption_dataloader(__C, split_name_list, batch_size=8, shuffle=False, num_workers=0):
     """
     Creates a DataLoader for the question-image captioning task.
+    No transform is applied here; the model's processor will handle it.
     """
     common_data = CommonData(__C)
-    
-    if transform is None:
-        transform = get_default_transform()
     
     dataset = DataSet(
         __C,
         common_data,
         split_name_list,
-        transform=transform
     )
 
     dataloader = DataLoader(
@@ -138,7 +141,7 @@ def create_caption_dataloader(__C, split_name_list, transform=None, batch_size=8
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        collate_fn=collate_fn
+        collate_fn=captions_collate_fn
     )
     
     return dataloader

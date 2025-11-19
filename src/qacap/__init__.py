@@ -12,5 +12,6 @@ High-level usage:
 """
 
 from .qacap import QACaptioner
+from .qacap_dataset import create_caption_dataloader
 
-__all__ = ['QACaptioner']
+__all__ = ['QACaptioner', 'create_caption_dataloader']
