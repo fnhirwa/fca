@@ -56,6 +56,7 @@ class Qid2Data(Dict):
 
         self.__C = __C
         self.annotated = annotated
+        # assert(0==1), f"Using QA caption: {getattr(self.__C, 'USE_QACAP', False)}"
         
         ques_set = []
         for split in splits:
@@ -76,62 +77,55 @@ class Qid2Data(Dict):
                 anno_set += _anno_set
             qid_to_anno = {str(a['question_id']): a for a in anno_set}
         
-        qid_to_topk = json.load(open(__C.CANDIDATES_PATH))
+        qid_to_topk = json.load(open(self.__C.CANDIDATES_PATH))
         # qid_to_topk = {t['question_id']: t for t in topk}
 
-        iid_to_capt = json.load(open(__C.CAPTIONS_PATH))
+        iid_to_capt = json.load(open(self.__C.CAPTIONS_PATH))
         
         # Load question-aware captions if enabled
         qid_to_qacapt = {}
-        if getattr(__C, 'USE_QACAP', False) and getattr(__C, 'QA_CAPTIONS_PATH', None):
+        # manually set the fca root path
+        self.__C.FCA_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../..'))
+        if getattr(self.__C, 'USE_QACAP', False) and getattr(self.__C, 'QA_CAPTION_PATH', None):
+            qa_path = getattr(self.__C, 'QA_CAPTION_PATH', None)
+            if qa_path and not os.path.isabs(qa_path):
+                qa_path = os.path.join(self.__C.FCA_PATH, qa_path)
             try:
-                with open(__C.QA_CAPTIONS_PATH, 'r') as f:
+                with open(qa_path, 'r') as f:
                    qid_to_qacapt = json.load(f)
                 print(f"Successfully loaded {len(qid_to_qacapt)} question-aware captions.")
             except FileNotFoundError:
-                print(f"Warning: QA Captions file not found at {__C.QA_CAPTIONS_PATH}. Proceeding without them.")
-        
+                print(f"Warning: QA Captions file not found at {qa_path}. Proceeding without them.")
         _score = aok_score if 'aok' in __C.TASK else ok_score
-        
-        # Filter to only process questions that have all required data
-        available_qids = set(qid_to_ques.keys()) & set(qid_to_topk.keys())
-        # Also filter by image IDs that have captions
-        available_iids = set(iid_to_capt.keys())
-        
-        orig_ques_count = len(qid_to_ques)
-        qid_to_ques_filtered = {
-            qid: q for qid, q in qid_to_ques.items() 
-            if qid in available_qids and str(q['image_id']) in available_iids
-        }
-        dropped = orig_ques_count - len(qid_to_ques_filtered)
-        if dropped > 0:
-            print(f"Warning: Dropped {dropped} questions due to missing captions or candidates.")
         
         qid_to_data = {}
         # ques_set = ques_set['questions']
         # anno_set = anno_set['annotations']
-        for qid in qid_to_ques_filtered:
-            q_item = qid_to_ques_filtered[qid]
+        for qid in qid_to_ques:
+            q_item = qid_to_ques[qid]
             t_item = qid_to_topk[qid]
 
             iid = str(q_item['image_id'])
             caption = iid_to_capt[iid].strip()
             if caption and caption[-1] != '.':
-                caption     = '.'
+                caption += '.'
 
             # If requested, fuse the QA-aware caption into the original caption.
             if getattr(__C, 'USE_QACAP', False):
                 qa_caption = qid_to_qacapt.get(qid, '')
+                # assert 0==1, f"Fusing QA captions original caption: {caption} with QA caption for qid {qa_caption}"
                 caption = fuse_caption_with_heuristics(
                     original_caption=caption,
                     qa_caption=qa_caption,
                     strategy=getattr(__C, 'QACAP_FUSION_STRATEGY', 'prepend')
                 )
-
+            
             qid_to_data[qid] = {
                 'question_id': qid,
                 'image_id': iid,
                 'question': q_item['question'],
+                # 'most_answer': most_answer,
+                # 'gt_scores': ans2score,
                 'topk_candidates': t_item,
                 'caption': caption,
             }
@@ -141,62 +135,30 @@ class Qid2Data(Dict):
                     answers = a_item['answers']
                 else:
                     answers = a_item['direct_answers']
+
                 ans2score = _score(answers)
 
                 most_answer = list(ans2score.keys())[0]
                 if most_answer == '':
                     most_answer = list(ans2score.keys())[1]
-
+                
                 qid_to_data[qid]['most_answer'] = most_answer
                 qid_to_data[qid]['gt_scores'] = ans2score
 
         self.qid_to_data = qid_to_data
 
-        # Optional subsetting for quick workflow testing
-        subset_count = getattr(__C, 'SUBSET_COUNT', None)
-        subset_ratio = getattr(__C, 'SUBSET_RATIO', None)
-        qid_list = list(self.qid_to_data.keys())
-        orig_size = len(qid_list)
-        
-        if subset_count is None and subset_ratio is not None:
-            if subset_ratio <= 0 or subset_ratio > 1:
-                raise ValueError('SUBSET_RATIO must be in (0, 1].')
-            subset_count = max(1, int(len(qid_list) * subset_ratio))
-        if subset_count is not None:
-            subset_count = min(subset_count, len(qid_list))
-            qid_list = qid_list[:subset_count]
-            # filter qid_to_data to only include subset
-            self.qid_to_data = {qid: self.qid_to_data[qid] for qid in qid_list}
-            print(f'== Applied subsetting: {len(self.qid_to_data)}/{orig_size} samples')
-
-        k = __C.K_CANDIDATES
+        k = self.__C.K_CANDIDATES
         if annotated:
             print(f'Loaded dataset size: {len(self.qid_to_data)}, top{k} accuracy: {self.topk_accuracy(k)*100:.2f}, top1 accuracy: {self.topk_accuracy(1)*100:.2f}')
         
         if similar_examples:
-            # Filter similar_examples to only include qids present in qid_to_data
-            valid_qids = set(self.qid_to_data.keys())
-            filtered_count = 0
-            
             for qid in similar_examples:
-                if qid in valid_qids:
-                    # Also filter the referenced similar_qids to only those present in qid_to_data
-                    raw_similar = similar_examples[qid]
-                    filtered_similar = [sim_qid for sim_qid in raw_similar if sim_qid in valid_qids]
-                    if len(filtered_similar) < len(raw_similar):
-                        filtered_count += 1
-                    self.qid_to_data[qid]['similar_qids'] = filtered_similar
+                qid_to_data[qid]['similar_qids'] = similar_examples[qid]
             
-            if filtered_count > 0:
-                print(f'== Filtered similar_qids for {filtered_count} questions due to subsetting/missing data')
-            
-            # Warn about items without similar_qids (but don't fail)
-            missing_similar = [qid for qid in self.qid_to_data if 'similar_qids' not in self.qid_to_data[qid]]
-            if missing_similar:
-                print(f'== Warning: {len(missing_similar)} questions have no similar_qids (example: {missing_similar[0]})')
-                # Set empty list for those without similar examples
-                for qid in missing_similar:
-                    self.qid_to_data[qid]['similar_qids'] = []
+            # check if all items have similar_qids
+            for qid, item in self.items():
+                if 'similar_qids' not in item:
+                    raise ValueError(f'qid {qid} does not have similar_qids')
         
         
 

@@ -115,7 +115,7 @@ class Cfgs(PATH):
         # --------------------------------
 
         self.USE_QACAP = True # change to false for baseline
-        self.QACAP_FUSION_STRATEGY = 'prepend'
+        self.QACAP_FUSION_STRATEGY = 'replace'
 
         self.CANDIDATE_NUM = getattr(args, 'CANDIDATE_NUM', None)
         if self.CANDIDATE_NUM is not None:
