@@ -38,14 +38,14 @@ def main():
     __C.override_from_dict(yaml_dict)
     
     # Manually set the prophet path to resolve relative paths in the config
-    __C.PROPHET_PATH = 'fca/third_party/prophet'
+    __C.PROPHET_PATH = 'third_party/prophet'
 
     print("Loaded configuration:")
     print(__C)
 
     # --- Dataloader Creation ---
     # The splits to generate captions for are typically the same as the eval splits for heuristics
-    splits_to_process = __C.TRAIN_SPLITS
+    splits_to_process = __C.EVAL_SPLITS
     print(f"Creating dataloader for splits: {splits_to_process}")
 
     # Note: The transform is handled internally by the QACaptioner's processor,

@@ -29,6 +29,9 @@ def get_args():
     parser.add_argument('--model_path', dest='MODEL_PATH', 
                         help='path or Hugging Face ID for LLaMA model', 
                         type=str, default=None)
+    parser.add_argument('--qa_caption_path', dest='QA_CAPTION_PATH', 
+                        help='path to load question-aware captions', 
+                        type=str, default=None)
     args = parser.parse_args()
     return args
 

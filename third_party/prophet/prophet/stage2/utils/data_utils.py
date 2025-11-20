@@ -86,7 +86,7 @@ class Qid2Data(Dict):
         if getattr(__C, 'USE_QACAP', False) and getattr(__C, 'QA_CAPTIONS_PATH', None):
             try:
                 with open(__C.QA_CAPTIONS_PATH, 'r') as f:
-                    qid_to_qacapt = json.load(f)
+                   qid_to_qacapt = json.load(f)
                 print(f"Successfully loaded {len(qid_to_qacapt)} question-aware captions.")
             except FileNotFoundError:
                 print(f"Warning: QA Captions file not found at {__C.QA_CAPTIONS_PATH}. Proceeding without them.")
@@ -111,37 +111,44 @@ class Qid2Data(Dict):
         # ques_set = ques_set['questions']
         # anno_set = anno_set['annotations']
         for qid in qid_to_ques_filtered:
-            ques = qid_to_ques[qid]
-            iid = str(ques['image_id'])
-            
-            # Fuse captions if USE_QACAP is True
-            original_caption = iid_to_capt.get(iid, {}).get('caption', '')
-            qa_caption = qid_to_qacapt.get(qid, '')
-            
+            q_item = qid_to_ques_filtered[qid]
+            t_item = qid_to_topk[qid]
+
+            iid = str(q_item['image_id'])
+            caption = iid_to_capt[iid].strip()
+            if caption and caption[-1] != '.':
+                caption     = '.'
+
+            # If requested, fuse the QA-aware caption into the original caption.
             if getattr(__C, 'USE_QACAP', False):
-                fused_caption = fuse_caption_with_heuristics(
-                    original_caption=original_caption,
+                qa_caption = qid_to_qacapt.get(qid, '')
+                caption = fuse_caption_with_heuristics(
+                    original_caption=caption,
                     qa_caption=qa_caption,
                     strategy=getattr(__C, 'QACAP_FUSION_STRATEGY', 'prepend')
                 )
-            else:
-                fused_caption = original_caption
 
-            data = {
-                'question': ques['question'],
-                'image_id': ques['image_id'],
-                'caption': fused_caption,
-                'topk_cand': qid_to_topk[qid],
+            qid_to_data[qid] = {
+                'question_id': qid,
+                'image_id': iid,
+                'question': q_item['question'],
+                'topk_candidates': t_item,
+                'caption': caption,
             }
             if annotated:
-                data['gt_answers'] = qid_to_anno[qid]['answers']
-                data['gt_scores'] = _score(data['gt_answers'])
-                data['most_answer'] = max(data['gt_scores'], key=data['gt_scores'].get)
-            
-            if similar_examples:
-                data['similar_qids'] = similar_examples[qid]
+                a_item = qid_to_anno[qid]
+                if 'answers' in a_item:
+                    answers = a_item['answers']
+                else:
+                    answers = a_item['direct_answers']
+                ans2score = _score(answers)
 
-            qid_to_data[qid] = data
+                most_answer = list(ans2score.keys())[0]
+                if most_answer == '':
+                    most_answer = list(ans2score.keys())[1]
+
+                qid_to_data[qid]['most_answer'] = most_answer
+                qid_to_data[qid]['gt_scores'] = ans2score
 
         self.qid_to_data = qid_to_data
 

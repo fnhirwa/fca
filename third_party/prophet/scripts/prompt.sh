@@ -21,6 +21,9 @@ while [[ $# -gt 0 ]]; do
     # --openai_key)
     #   OPENAI_KEY="$2"
     #   shift 2;;
+    --qa_caption_path)
+      QA_CAPTION_PATH="$2"
+      shift 2;;
     --subset_ratio)
       if [[ -z "$2" || "$2" == --* ]]; then echo "--subset_ratio requires a value"; exit 2; fi
       SUBSET_RATIO="$2"
@@ -43,6 +46,7 @@ CAPTIONS_PATH=${CAPTIONS_PATH:-"assets/captions_okvqa.json"} # path to the capti
 # OPENAI_KEY=${OPENAI_KEY:-""} # path to the captions
 # SUBSET_RATIO=${SUBSET_RATIO:-}
 # SUBSET_COUNT=${SUBSET_COUNT:-}
+QA_CAPTION_PATH=${QA_CAPTION_PATH:-""} # path to the captions
 
 
 python main.py \
@@ -52,5 +56,6 @@ python main.py \
     --examples_path $EXAMPLES_PATH \
     --candidates_path $CANDIDATES_PATH \
     --captions_path $CAPTIONS_PATH \
+    --qa_caption_path $QA_CAPTION_PATH \
 
     # --openai_key $OPENAI_KEY

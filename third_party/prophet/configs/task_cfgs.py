@@ -114,7 +114,7 @@ class Cfgs(PATH):
         # ---- Heuristics Generations ----
         # --------------------------------
 
-        self.USE_QACAP = False
+        self.USE_QACAP = True # change to false for baseline
         self.QACAP_FUSION_STRATEGY = 'prepend'
 
         self.CANDIDATE_NUM = getattr(args, 'CANDIDATE_NUM', None)
