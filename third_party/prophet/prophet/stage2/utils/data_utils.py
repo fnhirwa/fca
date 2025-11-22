@@ -91,11 +91,17 @@ class Qid2Data(Dict):
             if qa_path and not os.path.isabs(qa_path):
                 qa_path = os.path.join(self.__C.FCA_PATH, qa_path)
             try:
-                with open(qa_path, 'r') as f:
-                   qid_to_qacapt = json.load(f)
-                print(f"Successfully loaded {len(qid_to_qacapt)} question-aware captions.")
+                # files with extension .json inside qa_path
+                if os.path.isdir(qa_path):
+                    files = [f for f in os.listdir(qa_path) if f.endswith('.json')]
+                for file in files:
+                    file_path = os.path.join(qa_path, file)
+                    with open(file_path, 'r') as f:
+                        new_captions = json.load(f)
+                        qid_to_qacapt.update(new_captions)
+                        print(f"Successfully loaded {len(new_captions)} captions from {file_path}.")
             except FileNotFoundError:
-                print(f"Warning: QA Captions file not found at {qa_path}. Proceeding without them.")
+                print(f"Warning: QA Captions file not found in {qa_path}. Proceeding without them.")
         _score = aok_score if 'aok' in __C.TASK else ok_score
         
         qid_to_data = {}

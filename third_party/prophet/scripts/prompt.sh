@@ -56,6 +56,6 @@ python main.py \
     --examples_path $EXAMPLES_PATH \
     --candidates_path $CANDIDATES_PATH \
     --captions_path $CAPTIONS_PATH \
-    --qa_caption_path $QA_CAPTION_PATH \
+    ${QA_CAPTION_PATH:+--qa_caption_path "$QA_CAPTION_PATH"}
 
     # --openai_key $OPENAI_KEY

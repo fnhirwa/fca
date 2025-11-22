@@ -31,7 +31,7 @@ def get_args():
                         type=str, default=None)
     parser.add_argument('--qa_caption_path', dest='QA_CAPTION_PATH', 
                         help='path to load question-aware captions', 
-                        type=str, default=None)
+                        type=str, default=None, required=False)
     args = parser.parse_args()
     return args
 

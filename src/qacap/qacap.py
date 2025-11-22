@@ -55,12 +55,19 @@ def load_instructblip_model(
 @dataclass
 class QACaptionerConfig:
     """Configuration for QACaptioner."""
-    model_name_or_path: str = 'Salesforce/instructblip-flan-t5-xl'
+    model_name_or_path: str = 'Salesforce/instructblip-flan-t5-xxl'
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     fp16: bool = True
-    max_new_tokens: int = 32
-    temperature: float = 0.01
+    max_new_tokens: int = 256
     include_question_in_fallback: bool = True # Whether to include the question in the fallback caption.
+    do_sample=False,
+    num_beams=5,
+    max_length=256,
+    min_length=1,
+    top_p=0.9,
+    repetition_penalty=1.5,
+    length_penalty=1.0,
+    temperature=1,
 
 
 class QACaptioner:
@@ -95,11 +102,12 @@ class QACaptioner:
         self,
         image: Optional[Union[str, Image.Image]],
         question: str,
+        generation_config: Optional[GenerationConfig] = None
     ) -> str:
         """Generate a question-aware caption for a single image."""
         if self.using_stub or image is None:
             return self._heuristics(question=question)
-        return self._inference(image=image, question=question)
+        return self._inference(image=image, question=question, generation_config=generation_config)
 
     def generate_from_loader(self, dataloader) -> dict[str, str]:
         """
@@ -144,8 +152,14 @@ class QACaptioner:
         if generation_config is None:
             generation_config = GenerationConfig(
                 max_new_tokens=self.cfg.max_new_tokens,
-                temperature=self.cfg.temperature,
                 do_sample=False,
+                num_beams=self.cfg.num_beams,
+                max_length=self.cfg.max_length,
+                min_length=self.cfg.min_length,
+                top_p=self.cfg.top_p,
+                repetition_penalty=self.cfg.repetition_penalty,
+                length_penalty=self.cfg.length_penalty,
+                temperature=self.cfg.temperature,
             )
 
         with torch.no_grad():
