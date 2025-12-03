@@ -68,10 +68,27 @@ Refer to `third_party/prophet/README.md` for detailed documentation on the Proph
 1. Heuristic Generation: Generate question-aware captions using a pretrained VQA model and captioning model.
 2. Prompting: Use the generated captions to prompt a large language model for final answer
 
-#### Extensions
-The extended module for question-aware is implemented in `src/captioning/qa_captioner.py` and integrated into the heuristic generation stage.
+### QACap Integration
 
-The fusion with existing prophet code will be done in second stage (Prompting) where the generated captions are prepended to the original image captions before prompting the LLM.
+The core extension of this project is the integration of a **Question-Aware Captioning (QACap)** module. This module generates captions that are conditioned on the question, providing more relevant context to the downstream language model.
 
-For a deep dive into configuration (`__C`), data loaders, heuristics, prompting flow, subsetting, and integration points for question-aware captioning, see:
-[docs/stage_pipeline_guide.md](docs/stage_pipeline_guide.md)
+The implementation is in `src/qacap/qacap.py`, which provides a `QACaptioner` class wrapping an InstructBLIP model.
+
+#### Workflow
+
+1.  **QACap Module**: The `QACaptioner` takes an image and a question and generates a descriptive caption focused on details relevant to the question. It can be used in two modes:
+    *   **Offline**: Pre-generate captions for the entire dataset and save them as a JSON file.
+    *   **Online**: Generate captions at runtime during the prompting stage.
+
+2.  **Configuration**: The QACap integration is controlled via configuration in the YAML files and can be toggled with CLI flags. Key settings include:
+    *   `USE_QACAP`: A master switch to enable or disable the QACap module.
+    *   `QACAP_MODE`: "offline" or "online" generation.
+    *   `FUSION_POLICY`: A policy to combine the generated question-aware caption with the baseline caption from the original dataset. Policies include:
+        *   `append`: Add the new caption after the original.
+        *   `prepend`: Add the new caption before the original.
+        *   `replace_if_confident`: Replace the original caption if the QACap model is confident.
+        *   `ensemble`: Combine the QACap caption with heuristic concepts from Prophet's stage 1.
+
+3.  **Prompting**: In Stage 2 (prompting), the fused caption is used to construct the final prompt for the large language model (e.g., LLaMA 3), providing richer, more focused context for answer generation.
+
+This approach allows for flexible A/B testing between the baseline Prophet pipeline and the enhanced version with question-aware captioning.
