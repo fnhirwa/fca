@@ -1,6 +1,8 @@
 # fca
 From Captions to Answers: Enhancing Prophet with Question-Aware Captioning for Knowledge-Based VQA
 
+![Diagram](architecture.png)
+
 ## Third-party code: Prophet (vendored)
 
 We vendor the upstream Prophet repository under `third_party/prophet` to reuse most of its implementation and extend it with question‑aware captioning.
