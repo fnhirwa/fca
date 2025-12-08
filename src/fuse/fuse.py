@@ -9,7 +9,6 @@ from sentence_transformers import SentenceTransformer
 
 token = os.getenv("HUGGINGFACE_TOKEN")
 
-# Initialize the encoder once (matches "open-source pipeline" goal [cite: 20])
 encoder = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', token=token) 
 
 def apply_fusion_scoring(candidates, retrieved_examples, qa_caption, lambdas=(1.0, 0.5, 0.5)):
