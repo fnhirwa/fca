@@ -2,6 +2,56 @@
 Fusing different textual heuristics
 to construct a richer context for the final prompt.
 """
+import os
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+
+token = os.getenv("HUGGINGFACE_TOKEN")
+
+# Initialize the encoder once (matches "open-source pipeline" goal [cite: 20])
+encoder = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', token=token) 
+
+def apply_fusion_scoring(candidates, retrieved_examples, qa_caption, lambdas=(1.0, 0.5, 0.5)):
+    """
+    Re-ranks Prophet candidates based on QACap alignment.
+    
+    Parameters
+    ----------
+    candidates: List of dicts [{'answer': 'dog', 'score': 0.9, ...}] (from Prophet)
+    retrieved_examples: List of strings (the text of examples Prophet found)
+    qa_caption: String (your generated Question-Aware Caption)
+    lambdas: Tuple of weights (lambda1, lambda2, lambda3) [cite: 79]
+    """
+    if not retrieved_examples:
+        return candidates
+    l1, l2, l3 = lambdas
+
+    cap_emb = encoder.encode([qa_caption]) 
+    ex_embs = encoder.encode(retrieved_examples)
+    
+    cap_ex_sims = cosine_similarity(cap_emb, ex_embs)[0]
+    
+    ranked_candidates = []
+    
+    avg_sim = np.mean(cap_ex_sims) if len(cap_ex_sims) > 0 else 0
+    
+    for i, cand in enumerate(candidates):
+        s_j = cand.get('score', 0)
+        sim_z_zi = cand.get('retrieval_sim', 0)
+        
+        sim_cap_zi = cap_ex_sims[i] if i < len(cap_ex_sims) else avg_sim
+        
+        new_score = (l1 * s_j) + (l2 * sim_z_zi) + (l3 * sim_cap_zi)
+        
+        cand_new = cand.copy()
+        cand_new['fused_score'] = new_score
+        ranked_candidates.append(cand_new)
+        
+    ranked_candidates.sort(key=lambda x: x['fused_score'], reverse=True)
+    
+    return ranked_candidates
+
 
 def fuse_caption_with_heuristics(
     original_caption: str,

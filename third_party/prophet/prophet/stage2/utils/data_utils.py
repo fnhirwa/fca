@@ -12,7 +12,7 @@ import os
 
 # allow imports from fca.src
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../../..')))
-from fca.src.fuse.fuse import fuse_caption_with_heuristics
+from fca.src.fuse.fuse import fuse_caption_with_heuristics, apply_fusion_scoring
 
 # following two score is rough, and only for print accuracies during inferring.
 def ok_score(gt_answers):
@@ -51,11 +51,12 @@ def aok_score(gt_answers):
 
 
 class Qid2Data(Dict):
-    def __init__(self, __C, splits, annotated=False, similar_examples=None):
+    def __init__(self, __C, splits, annotated=False, similar_examples=None, trainset=None):
         super().__init__()
 
         self.__C = __C
         self.annotated = annotated
+        self.trainset = trainset
         # assert(0==1), f"Using QA caption: {getattr(self.__C, 'USE_QACAP', False)}"
         
         ques_set = []
@@ -119,6 +120,19 @@ class Qid2Data(Dict):
             # If requested, fuse the QA-aware caption into the original caption.
             if getattr(__C, 'USE_QACAP', False):
                 qa_caption = qid_to_qacapt.get(qid, '')
+                example_texts = []
+                if self.trainset and similar_examples and qid in similar_examples:
+                    similar_qids = similar_examples[qid]
+                    for similar_qid in similar_qids:
+                        question = self.trainset.get_question(similar_qid)
+                        caption = self.trainset.get_caption(similar_qid)
+                        example_texts.append(f"Question: {question} Context: {caption}")
+                t_item = apply_fusion_scoring(
+                    candidates=t_item, 
+                    retrieved_examples=example_texts,
+                    qa_caption=qa_caption,
+                    lambdas=(1.0, 0.5, 0.5) # Tune these weights
+                )
                 # assert 0==1, f"Fusing QA captions original caption: {caption} with QA caption for qid {qa_caption}"
                 caption = fuse_caption_with_heuristics(
                     original_caption=caption,

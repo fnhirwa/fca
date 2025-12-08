@@ -289,7 +289,8 @@ class Runner:
             self.__C, 
             self.__C.EVAL_SPLITS,
             self.__C.EVAL_NOW,
-            json.load(open(self.__C.EXAMPLES_PATH, 'r'))
+            json.load(open(self.__C.EXAMPLES_PATH, 'r')),
+            trainset=self.trainset
         )
 
         # if 'aok' in self.__C.TASK:
